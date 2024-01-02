@@ -1254,15 +1254,15 @@ int server(int argc, char **argv)
 	struct sockaddr client_addr;
 	pthread_t thread;
 
-	for (int i = 1; i < argc; ++i)
+	for (int i = 2; i < argc; ++i)
 	{
-		if(strcmp(argv[i], "-l"))
+		if(strcmp(argv[i], "-l") == 0)
 		{
 			i++;
 			listen_addr = argv[i];
 			continue;
 		}
-		if(strcmp(argv[i], "-p"))
+		if(strcmp(argv[i], "-p") == 0)
 		{
 			i++;
 			listen_port = atoi(argv[i]);
@@ -1273,6 +1273,8 @@ int server(int argc, char **argv)
 	server_addr.sin_port = htons(listen_port);
 	server_addr.sin_addr.s_addr = inet_addr(listen_addr);
 
+	loginfo("addr:%s port:%d\n", listen_addr, listen_port);
+	
 	server_fd = socket(AF_INET, SOCK_STREAM, 0);
 	if (server_fd < 0)
 	{
