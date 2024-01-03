@@ -63,6 +63,7 @@ extern char **ori_argv;
 
 int endWith(const char *originString, char *end);
 int get_random_str(char* random_str, const int random_len);
+char *new_random_file_path(char *dest);
 int mk_tmp_dir(char * path);
 int delete_file(char * path);
 int read_all(int fd, char *buffer, size_t len);

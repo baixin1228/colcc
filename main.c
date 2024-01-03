@@ -11,6 +11,7 @@
 #include <fcntl.h>
 #include <stdbool.h>
 #include <pthread.h>
+#include <sys/un.h>
 #include <sys/time.h>
 #include <sys/random.h>
 #include <arpa/inet.h>
@@ -36,6 +37,9 @@ const char *gcc_spec_params[] =
 		"-B",
 		"-x"
 	};
+
+#define MSG_ADDR "/tmp/colcc/colcc_client"
+#define START_CODE "\x03\x03\x03\x03\x02\x02\x02\x02"
 
 int to_gcc_local(int argc, char **argv)
 {
@@ -79,6 +83,12 @@ enum {
 	CMD_ERR
 };
 
+enum {
+	GET_FD = 1,
+	PUT_FD,
+	HEART_BEAT,
+};
+
 int wait_start(FILE *socket_fp)
 {
 	char read_byte;
@@ -105,6 +115,7 @@ int wait_start(FILE *socket_fp)
 	return -1;
 }
 
+#define FILE_BUF_SIZE 0x10000
 int recv_remote_file(FILE *socket_fp, char *file_name, char *rename, bool safe_read)
 {
 	int ret = 0;
@@ -114,7 +125,7 @@ int recv_remote_file(FILE *socket_fp, char *file_name, char *rename, bool safe_r
 	char *recv_buf = NULL;
 	char *remote_output_file = NULL;
 
-	recv_buf = malloc(4096);
+	recv_buf = malloc(FILE_BUF_SIZE);
 	if(recv_buf == NULL)
 	{
 		logerr("recv_remote_file malloc fail\n");
@@ -188,7 +199,7 @@ int recv_remote_file(FILE *socket_fp, char *file_name, char *rename, bool safe_r
 
 	while(params_len)
 	{
-		int read_len = params_len > 4096 ? 4096 : params_len;
+		int read_len = params_len > FILE_BUF_SIZE ? FILE_BUF_SIZE : params_len;
 		if(safe_read)
 			ret = safe_fread_all(socket_fp, recv_buf, read_len);
 		else
@@ -229,7 +240,7 @@ int send_remote_file(FILE *socket_fp, char *file_name, char *rename)
 	uint32_t file_name_len;
 	char *read_buffer = NULL;
 
-	read_buffer = malloc(4096);
+	read_buffer = malloc(FILE_BUF_SIZE);
 	if(read_buffer == NULL)
 	{
 		logerr("recv_remote_file malloc fail\n");
@@ -301,22 +312,22 @@ int send_remote_file(FILE *socket_fp, char *file_name, char *rename)
 		ret = -1;
 		goto out;
 	}
-    while(!feof(fp)){
-        read_len = fread(read_buffer, 1, 4096, fp);
-        if(read_len > 0)
-        {
-        	if(fwrite_all(socket_fp, read_buffer, read_len) != 0)
+	while(!feof(fp)){
+		read_len = fread(read_buffer, 1, FILE_BUF_SIZE, fp);
+		if(read_len > 0)
+		{
+			if(fwrite_all(socket_fp, read_buffer, read_len) != 0)
 			{
 				logerr("send_remote_file write fail.\n");
 				ret = -1;
 				goto out;
 			}
-        } else {
+		} else {
 			logerr("file:%s read fail.\n", file_name);
 			ret = -1;
 			goto out;
-        }
-    }
+		}
+	}
 
 out:
 	if(fp)
@@ -334,7 +345,7 @@ int delete_remote_file(FILE *socket_fp, char *file_name)
 	uint32_t file_name_len;
 
 	/* ----------------------- cmd start ---------------------- */
-	if(fwrite_all(socket_fp, "\x03\x03\x03\x03\x02\x02\x02\x02", 8) != 0)
+	if(fwrite_all(socket_fp, START_CODE, 8) != 0)
 	{
 		logerr("delete_remote_file write all fail.\n");
 		return -1;
@@ -491,9 +502,7 @@ int to_gcc_compiler(struct remote_arg *remote_arg, char *input_file, char *outpu
 		if(remote_arg->c) {
 			rel_output_file = output_file;
 		} else {
-			strcpy(c_output_file, "/tmp/colcc/");
-			get_random_str(c_output_file + 11, 16);
-			strcpy(c_output_file + 27, ".o");
+			strcpy(new_random_file_path(c_output_file), ".o");
 			rel_output_file = c_output_file;
 		}
 
@@ -506,14 +515,10 @@ int to_gcc_compiler(struct remote_arg *remote_arg, char *input_file, char *outpu
 		if(ret != 0)
 			goto out;
 	} else {
-		strcpy(c_output_file, "/tmp/colcc/");
-		get_random_str(c_output_file + 11, 16);
-		strcpy(c_output_file + 27, ".o");
+		strcpy(new_random_file_path(c_output_file), ".o");
 		rel_output_file = c_output_file;
 
-		strcpy(c_remote_file, "/tmp/colcc/");
-		get_random_str(c_remote_file + 11, 16);
-		strcpy(c_remote_file + 27, ".o");
+		strcpy(new_random_file_path(c_remote_file), ".o");
 
 		remote_arg->c_params[remote_arg->c_params_count] = "-o";
 		remote_arg->c_params_count++;
@@ -521,7 +526,7 @@ int to_gcc_compiler(struct remote_arg *remote_arg, char *input_file, char *outpu
 		remote_arg->c_params_count++;
 
 		/* ----------------------- cmd start ---------------------- */
-		if(fwrite_all(remote_arg->socket_fp, "\x03\x03\x03\x03\x02\x02\x02\x02", 8) != 0)
+		if(fwrite_all(remote_arg->socket_fp, START_CODE, 8) != 0)
 		{
 			logerr("to_gcc_compiler write all fail.\n");
 			ret = -1;
@@ -556,7 +561,7 @@ int to_gcc_compiler(struct remote_arg *remote_arg, char *input_file, char *outpu
 		/* ----------------------- cmd end ---------------------- */
 
 		/* ----------------------- cmd start ---------------------- */
-		if(fwrite_all(remote_arg->socket_fp, "\x03\x03\x03\x03\x02\x02\x02\x02", 8) != 0)
+		if(fwrite_all(remote_arg->socket_fp, START_CODE, 8) != 0)
 		{
 			logerr("to_gcc_compiler write all fail.\n");
 			ret = -1;
@@ -636,11 +641,9 @@ int to_gcc_direct_compiler(struct remote_arg *remote_arg, char *input_file, char
 
 	if(!remote_arg->local)
 	{
-		strcpy(e_remote_file, "/tmp/colcc/");
-		get_random_str(e_remote_file + 11, 16);
-		strcpy(e_remote_file + 27, ".i");
+		strcpy(new_random_file_path(e_remote_file), ".i");
 		/* ----------------------- cmd start ---------------------- */
-		if(fwrite_all(remote_arg->socket_fp, "\x03\x03\x03\x03\x02\x02\x02\x02", 8) != 0)
+		if(fwrite_all(remote_arg->socket_fp, START_CODE, 8) != 0)
 		{
 			logerr("to_gcc_direct_compiler write all fail.\n");
 			ret = -1;
@@ -718,9 +721,7 @@ int to_gcc_pretreatment(struct remote_arg *remote_arg, char *input_file, char *o
 		remote_arg->e_params[remote_arg->e_params_count] = output_file;
 		remote_arg->e_params_count++;
 	} else {
-		strcpy(e_output_file, "/tmp/colcc/");
-		get_random_str(e_output_file + 11, 16);
-		strcpy(e_output_file + 27, ".i");
+		strcpy(new_random_file_path(e_output_file), ".i");
 
 		remote_arg->e_params[remote_arg->e_params_count] = "-o";
 		remote_arg->e_params_count++;
@@ -738,12 +739,10 @@ int to_gcc_pretreatment(struct remote_arg *remote_arg, char *input_file, char *o
 	else {
 		if(!remote_arg->local)
 		{
-			strcpy(e_remote_file, "/tmp/colcc/");
-			get_random_str(e_remote_file + 11, 16);
-			strcpy(e_remote_file + 27, ".i");
+			strcpy(new_random_file_path(e_remote_file), ".i");
 			compiler_input_file = e_remote_file;
 			/* ----------------------- cmd start ---------------------- */
-			if(fwrite_all(remote_arg->socket_fp, "\x03\x03\x03\x03\x02\x02\x02\x02", 8) != 0)
+			if(fwrite_all(remote_arg->socket_fp, START_CODE, 8) != 0)
 			{
 				logerr("to_gcc_pretreatment write all fail.\n");
 				ret = -1;
@@ -799,12 +798,19 @@ out:
 int to_gcc_remote(int argc, char **argv)
 {
 	int ret;
+	int c_fd = -1;
 	int socket_fd;
 	char *local_env;
+	uint32_t msg_data[2];
+	uint32_t fd_handle;
+	char recv_name[32] = {0};
 	int input_file_count = 0;
+	struct msghdr send_msg = {0};
+	struct msghdr recv_msg = {0};
+	struct sockaddr_un un_client;
+	struct sockaddr_un un_server;
 	static char *input_files[128] = {NULL};
 	char *output_file = NULL;
-	struct sockaddr_in serv_addr = {0};
 
 	static struct remote_arg remote_arg = {0};
 
@@ -935,6 +941,80 @@ cc:
 single_input:
 	if(!remote_arg.local)
 	{
+		un_client.sun_family = AF_UNIX;
+		strcpy(new_random_file_path(un_client.sun_path), ".i");
+		unlink(un_client.sun_path);
+		
+		socket_fd = socket(AF_UNIX, SOCK_DGRAM, 0);
+		if (socket_fd < 0)
+		{
+			logerr("create socket error!\n");
+			socket_fd = -1;
+			ret = -1;
+			goto out;
+		}
+
+		if (bind(socket_fd, (struct sockaddr*)&un_client, sizeof(un_client)) < 0) {
+			logerr("bind failed\n");
+			ret = -1;
+			goto out;
+		}
+
+		msg_data[0] = GET_FD;
+		struct iovec data_iov = {&msg_data, sizeof(msg_data)};
+
+		un_server.sun_family = AF_UNIX;
+		strcpy(un_server.sun_path, MSG_ADDR);
+
+		send_msg.msg_name = (void*)&un_server;
+		send_msg.msg_namelen = sizeof(un_server);
+		send_msg.msg_iov = &data_iov;
+		send_msg.msg_iovlen = 1;
+
+		ret = sendmsg(socket_fd, &send_msg, 0);
+		if (ret < 0)
+		{
+			logerr("sendmsg error! %s %s\n", strerror(errno), MSG_ADDR);
+			ret = -1;
+			goto out;
+		}
+
+		recv_msg.msg_name = (void*)recv_name;
+		recv_msg.msg_namelen = sizeof(recv_name);
+		recv_msg.msg_iov = &data_iov;
+		recv_msg.msg_iovlen = 1;
+		char cmsg[CMSG_SPACE(sizeof(int))];
+		recv_msg.msg_control = &cmsg;
+		recv_msg.msg_controllen = sizeof(cmsg);
+
+		ret = recvmsg(socket_fd, &recv_msg, 0);
+		if (ret < 0)
+		{
+			logerr("recvmsg error!\n");
+			ret = -1;
+			goto out;
+		}
+
+		if(msg_data[0] != CMD_OK)
+		{
+			logerr("response err!\n");
+			ret = -1;
+			goto out;
+		}
+		
+		fd_handle = msg_data[1];
+		struct cmsghdr *ctrl = CMSG_FIRSTHDR(&recv_msg);
+		c_fd = *(int*)CMSG_DATA(ctrl);
+
+		remote_arg.socket_fp = fdopen(c_fd, "rb+");
+		if(remote_arg.socket_fp == NULL)
+		{
+			logerr("fdopen fail!\n");
+			ret = -1;
+			goto out;
+		}
+#if 0
+		struct sockaddr_in serv_addr = {0};
 		serv_addr.sin_family = AF_INET;
 		serv_addr.sin_port = ntohs(host_port);
 		serv_addr.sin_addr.s_addr = inet_addr(host_addr);
@@ -946,14 +1026,17 @@ single_input:
 			socket_fd = -1;
 			ret = -1;
 			goto out;
-		} else {
-			if((ret = connect(socket_fd, (struct sockaddr *)&serv_addr, sizeof(struct sockaddr))) < 0)
-			{
-				logerr("connect error!\n");
-				goto out;
-			}
 		}
+
+		if((ret = connect(socket_fd, (struct sockaddr *)&serv_addr, sizeof(struct sockaddr))) < 0)
+		{
+			logerr("connect:%s error!\n", host_addr);
+			goto out;
+		}
+
 		remote_arg.socket_fp = fdopen(socket_fd, "rb+");
+		socket_fd = -1;
+#endif
 	}
 
 	if(endWith(input_files[0], ".i") == 0)
@@ -965,6 +1048,33 @@ single_input:
 	ret = to_gcc_pretreatment(&remote_arg, input_files[0], output_file);
 
 out:
+	if(socket_fd)
+	{
+		if(c_fd != -1)
+		{
+			char cmsg_send[CMSG_SPACE(sizeof(int))];
+			send_msg.msg_control = &cmsg_send;
+			send_msg.msg_controllen = sizeof(cmsg_send);
+			struct cmsghdr *control = CMSG_FIRSTHDR(&send_msg);
+			control->cmsg_level = SOL_SOCKET;
+			control->cmsg_type = SCM_RIGHTS;
+			control->cmsg_len = CMSG_LEN(sizeof(int));
+			*(int*)CMSG_DATA(control) = c_fd;
+
+			msg_data[0] = PUT_FD;
+			msg_data[1] = fd_handle;
+
+			ret = sendmsg(socket_fd, &send_msg, 0);
+			if (ret < 0)
+			{
+				logerr("sendmsg error! %s %s\n", strerror(errno), MSG_ADDR);
+			}
+			ret = 0;
+		}
+		close(socket_fd);
+		unlink(un_client.sun_path);
+	}
+
 	if(remote_arg.socket_fp)
 		fclose(remote_arg.socket_fp);
 
@@ -1044,7 +1154,217 @@ cc:
 	return 0;
 }
 
-/* ---------------------------------------- */
+/* ------------------ client ---------------------- */
+struct server_socket_fd
+{
+	int fd;
+	struct timeval time;
+};
+
+struct server_info
+{
+	char addr[64];
+	uint16_t port;
+	uint32_t ts_count;
+	struct server_socket_fd socket_fds[512];
+	char compression[32];
+} server_info[128] = {0};
+
+int client(int argc, char **argv)
+{
+	int i, j;
+	int ret = 0;
+	char *tmp;
+	int ser_idx = 0;
+	int socket_fd = -1;
+	uint32_t recv_data[2] = {0};
+	struct sockaddr_un server_un = {0};
+	struct sockaddr_un client_un = {0};
+	struct sockaddr_in server_addr = {0};
+	struct server_socket_fd *send_fd_ptr;
+
+	for (int i = 2; i < argc; ++i)
+	{
+		if(strcmp(argv[i], "-h") == 0)
+		{
+			i++;
+
+			tmp = strchr(argv[i], ',');
+			if(tmp != NULL)
+			{
+				strcpy(server_info[ser_idx].compression, tmp + 1);
+				*tmp = '\0';
+			}
+
+			tmp = strchr(argv[i], '/');
+			if(tmp != NULL)
+			{
+				server_info[ser_idx].ts_count = atoi(tmp + 1);
+				*tmp = '\0';
+			} else {
+				server_info[ser_idx].ts_count = 1;
+			}
+
+			tmp = strchr(argv[i], ':');
+			if(tmp != NULL)
+			{
+				server_info[ser_idx].port = atoi(tmp + 1);
+				*tmp = '\0';
+			} else {
+				server_info[ser_idx].port = 3633;
+			}
+
+			strcpy(server_info[ser_idx].addr, argv[i]);
+			ser_idx++;
+			continue;
+		}
+	}
+
+	if(ser_idx == 0)
+	{
+		logerr("no host given.\n");
+		ret = -1;
+		goto out;
+	}
+
+	for (i = 0; i < ser_idx; ++i)
+	{
+		server_addr.sin_family = AF_INET;
+		server_addr.sin_port = ntohs(server_info[i].port);
+		server_addr.sin_addr.s_addr = inet_addr(server_info[i].addr);
+
+		for (j = 0; j < server_info[i].ts_count; ++j)
+		{
+			socket_fd = socket(AF_INET, SOCK_STREAM, 0);
+			if (socket_fd < 0)
+			{
+				logerr("create socket error!\n");
+				socket_fd = -1;
+				ret = -1;
+				goto out;
+			}
+
+			if((ret = connect(socket_fd, (struct sockaddr *)&server_addr, sizeof(struct sockaddr))) < 0)
+			{
+				logerr("connect:%s error!\n", server_info[i].addr);
+				goto out;
+			}
+
+			printf("connected %s:%d i:%d j:%d fd:%d\n", server_info[i].addr, server_info[i].port, i, j, socket_fd);
+			server_info[i].socket_fds[j].fd = socket_fd;
+		}
+	}
+
+	socket_fd = socket(AF_UNIX, SOCK_DGRAM, 0);
+
+	server_un.sun_family = AF_UNIX;
+	strcpy(server_un.sun_path, MSG_ADDR);
+	unlink(server_un.sun_path);
+
+	if (bind(socket_fd, (struct sockaddr*)&server_un, sizeof(server_un)) < 0) {
+		printf("bind failed\n");
+		ret = -1;
+		goto out;
+	}
+
+	struct msghdr recv_msg = {0};
+	recv_msg.msg_name = &client_un;
+	recv_msg.msg_namelen = sizeof(client_un);
+	struct iovec data_iov = {&recv_data, sizeof(recv_data)};
+	recv_msg.msg_iov = &data_iov;
+	recv_msg.msg_iovlen = 1;
+	char cmsg[CMSG_SPACE(sizeof(int))];
+
+	struct msghdr send_msg = {0};
+	send_msg.msg_name = &client_un;
+	send_msg.msg_namelen = sizeof(client_un);
+	send_msg.msg_iov = &data_iov;
+	send_msg.msg_iovlen = 1;
+	char cmsg_send[CMSG_SPACE(sizeof(int))];
+
+	while(1)
+	{
+		recv_msg.msg_control = &cmsg;
+		recv_msg.msg_controllen = sizeof(cmsg);
+
+		ret = recvmsg(socket_fd, &recv_msg, 0);
+		if(ret <= 0)
+		{
+			logerr("recv err ret:%d %s\n", ret, strerror(errno));
+			ret = -1;
+			goto out;
+		}
+
+		switch(recv_data[0])
+		{
+			case GET_FD:
+			{
+				send_fd_ptr = NULL;
+				for (i = 0; i < 128; ++i)
+				{
+					for (j = 0; j < 512; ++j)
+					{
+						if(server_info[i].socket_fds[j].fd)
+						{
+							recv_data[1] = ((i << 16) | (j & 0xffff));
+							send_fd_ptr = &server_info[i].socket_fds[j];
+							goto find;
+						}
+					}
+				}
+find:
+				if(!send_fd_ptr)
+				{
+					logerr("not fd\n");
+					ret = -1;
+					goto out;
+				}
+
+				send_msg.msg_control = &cmsg_send;
+				send_msg.msg_controllen = sizeof(cmsg_send);
+				struct cmsghdr *control = CMSG_FIRSTHDR(&send_msg);
+				control->cmsg_level = SOL_SOCKET;
+				control->cmsg_type = SCM_RIGHTS;
+				control->cmsg_len = CMSG_LEN(sizeof(int));
+				*(int*)CMSG_DATA(control) = send_fd_ptr->fd;
+
+				recv_data[0] = CMD_OK;
+				ret = sendmsg(socket_fd, &send_msg, 0);
+				if(ret <= 0)
+				{
+					logerr("sendmsg fail, %s\n", strerror(errno));
+					ret = -1;
+					goto out;
+				}
+				printf("send i:%d j:%d fd:%d\n", i, j, send_fd_ptr->fd);
+
+				/* change controller */
+				close(send_fd_ptr->fd);
+				send_fd_ptr->fd = 0;
+				gettimeofday(&send_fd_ptr->time, NULL);
+			}
+			break;
+			case HEART_BEAT:
+				printf("heart\n");
+				gettimeofday(&server_info[recv_data[1] >> 16].socket_fds[recv_data[1] & 0xffff].time, NULL);
+			break;
+			case PUT_FD:
+				struct cmsghdr *ctrl = CMSG_FIRSTHDR(&recv_msg);
+				printf("put i:%d j:%d fd:%d\n", recv_data[1] >> 16, recv_data[1] & 0xffff, *(int*)CMSG_DATA(ctrl));
+				server_info[recv_data[1] >> 16].socket_fds[recv_data[1] & 0xffff].fd = *(int*)CMSG_DATA(ctrl);
+			break;
+			default:
+				logerr("unknow cmd:%d\n", recv_data[0]);
+			break;
+		}
+	}
+
+out:
+	return ret;
+}
+
+
+/* ------------------ server ---------------------- */
 int server_recv_file(FILE *socket_fp)
 {
 	return recv_remote_file(socket_fp, NULL, NULL, true);
@@ -1274,7 +1594,7 @@ int server(int argc, char **argv)
 	server_addr.sin_addr.s_addr = inet_addr(listen_addr);
 
 	loginfo("addr:%s port:%d\n", listen_addr, listen_port);
-	
+
 	server_fd = socket(AF_INET, SOCK_STREAM, 0);
 	if (server_fd < 0)
 	{
@@ -1394,13 +1714,19 @@ int main(int argc, char **argv)
 	if(strcmp("gcc", argv[1]) == 0)
 	{
 		ret = to_gcc(argc, argv);
-		goto out;
+		goto out2;
+	}
+
+	if(strcmp("client", argv[1]) == 0)
+	{
+		ret = client(argc, argv);
+		goto out1;
 	}
 
 	if(strcmp("server", argv[1]) == 0)
 	{
 		ret = server(argc, argv);
-		goto out;
+		goto out1;
 	}
 
 	if(strcmp("--help", argv[1]) == 0)
@@ -1412,7 +1738,7 @@ int main(int argc, char **argv)
 		printf("                  [-l addr] [-p port]\n");
 	}
 
-out:
+out2:
 	if(ret != 0)
 	{
 		logerr("---> ori:\n");
@@ -1420,5 +1746,6 @@ out:
 			logerr("%s ", argv[i]);
 		logerr("\n");
 	}
+out1:
 	return ret;
 }

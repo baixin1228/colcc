@@ -52,6 +52,13 @@ int get_random_str(char* random_str, const int random_len)
 	return 0;
 }
 
+char *new_random_file_path(char *dest)
+{
+	strcpy(dest, "/tmp/colcc/");
+	get_random_str(dest + 11, 16);
+	return dest + 27;
+}
+
 int mk_tmp_dir(char * path)
 {
 	if((access(path, 0)))
