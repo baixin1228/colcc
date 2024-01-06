@@ -111,6 +111,39 @@ int write_all(int fd, char *buffer, size_t len)
 	return 0;
 }
 
+struct fread_cache {
+	char *cache;
+	int head;
+	int tail;
+};
+
+struct fread_cache caches[1024] = {0};
+int fread_cache(FILE *fp, char *buffer, size_t len)
+{
+	int ret;
+	int fd = fileno(fp);
+	if(!caches[fd].cache)
+	{
+		caches[fd].cache = malloc(10240);
+	}
+
+	if(caches[fd].head == caches[fd].tail)
+	{
+		ret = fread(caches[fd].cache, 1, 10240, fp);
+		if(ret <= 0)
+			return ret;
+
+		caches[fd].tail = ret;
+		caches[fd].head = 0;
+	}
+
+	ret = len < caches[fd].tail - caches[fd].head ? len : caches[fd].tail - caches[fd].head;
+	memcpy(buffer, caches[fd].cache + caches[fd].head, ret);
+	caches[fd].head += ret;
+
+	return ret;
+}
+
 int fread_all(FILE *fp, char *buffer, size_t len)
 {
 	int read_sum = 0;
@@ -118,36 +151,6 @@ int fread_all(FILE *fp, char *buffer, size_t len)
 	while(len)
 	{
 		read_con = fread(buffer + read_sum, 1, len, fp);
-		if(read_con > 0)
-		{
-			read_sum += read_con;
-			len -= read_con;
-		} else
-			return -1;
-	}
-	return 0;
-}
-
-int safe_fread_all(FILE *fp, char *buffer, size_t len)
-{
-	static int stop_count = 0;
-	int read_sum = 0;
-	int read_con;
-	while(len)
-	{
-		read_con = fread(buffer + read_sum, 1, 1, fp);
-
-		if(buffer[read_sum] == '\x03')
-			stop_count++;
-		else
-			stop_count = 0;
-
-		if(stop_count == 4)
-		{
-			logerr("break!!! reset.\n");
-			return -1;
-		}
-
 		if(read_con > 0)
 		{
 			read_sum += read_con;

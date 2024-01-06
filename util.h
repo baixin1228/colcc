@@ -1,5 +1,7 @@
 #pragma once
 
+#include <sys/time.h>
+
 extern int debug;
 extern int debug_protocol;
 extern int debug_file;
@@ -7,6 +9,11 @@ extern FILE *log_fp;
 extern FILE *logerr_fp;
 extern int ori_argc;
 extern char **ori_argv;
+
+#define timesub_ms(start, end) \
+({\
+	end.tv_sec * 1000 + end.tv_usec / 1000 - start.tv_sec * 1000 - start.tv_usec / 1000;\
+})
 
 #define logstd(args...) { \
 	if(debug)\
@@ -70,6 +77,7 @@ int read_all(int fd, char *buffer, size_t len);
 int write_all(int fd, char *buffer, size_t len);
 
 int fread_all(FILE *fp, char *buffer, size_t len);
+int fread_cache(FILE *fp, char *buffer, size_t len);
 int safe_fread_all(FILE *fp, char *buffer, size_t len);
 int fwrite_all(FILE *fp, char *buffer, size_t len);
 int mini_exec(int argc, char **argv, bool need_fork, int out_fd);
