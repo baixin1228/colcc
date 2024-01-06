@@ -94,9 +94,10 @@ void disable_task(struct gcc_task *task)
 	task->state = NONE;
 }
 
+uint32_t server_count = 0;
 void *task_daemon(void *data)
 {
-	int i, j;
+	int i, j, k = 0;
 	uint32_t task_id;
 	struct timeval now;
 	struct gcc_task *task;
@@ -135,25 +136,29 @@ void *task_daemon(void *data)
 		}
 
 		send_fd_obj = NULL;
-		for (i = 0; i < 128; ++i)
+
+		if(k == server_count)
+			k = 0;
+
+		for (; k < server_count; ++k)
 		{
-			for (j = 0; j < 512; ++j)
+			for (j = 0; j < server_info[k].ts_count; ++j)
 			{
-				if(!server_info[i].fd_objs[j].fd &&
-					!server_info[i].fd_objs[j].task)
+				if(!server_info[k].fd_objs[j].fd &&
+					!server_info[k].fd_objs[j].task)
 				{
 					server_addr.sin_family = AF_INET;
-					server_addr.sin_port = htons(server_info[i].port);
-					server_addr.sin_addr.s_addr = inet_addr(server_info[i].addr);
-					server_info[i].fd_objs[j].fd = connect_new(&server_addr);
-					if(server_info[i].fd_objs[j].fd == -1)
-						server_info[i].fd_objs[j].fd = 0;
+					server_addr.sin_port = htons(server_info[k].port);
+					server_addr.sin_addr.s_addr = inet_addr(server_info[k].addr);
+					server_info[k].fd_objs[j].fd = connect_new(&server_addr);
+					if(server_info[k].fd_objs[j].fd == -1)
+						server_info[k].fd_objs[j].fd = 0;
 				}
 
-				if(server_info[i].fd_objs[j].fd &&
-					!server_info[i].fd_objs[j].task)
+				if(server_info[k].fd_objs[j].fd &&
+					!server_info[k].fd_objs[j].task)
 				{
-					send_fd_obj = &server_info[i].fd_objs[j];
+					send_fd_obj = &server_info[k].fd_objs[j];
 					goto find;
 				}
 			}
@@ -164,9 +169,9 @@ void *task_daemon(void *data)
 		continue;
 find:
 		send_data[0] = CMD_OK;
-		send_data[1] = server_info[i].compression << 16 | (task_id & 0xffff);
+		send_data[1] = server_info[k].compression << 16 | (task_id & 0xffff);
 		if(msg_send_fd(socket_fd, &task->client_un, send_fd_obj->fd, (char *)&send_data, sizeof(send_data)) == 0)
-			printf("send fd:%d task_id:%d\n", send_fd_obj->fd, task_id);
+			printf("send fd:%d task_id:%-3d addr:%s\n", send_fd_obj->fd, task_id, server_info[k].addr);
 		else {
 			logerr("send fail fd:%d task_id:%d socket:%s\n", send_fd_obj->fd, task_id, task->client_un.sun_path);
 			disable_task(task);
@@ -179,6 +184,7 @@ find:
 		send_fd_obj->task = task;
 		task->fd_obj = send_fd_obj;
 		task->state = WORKING;
+		k++;
 	}
 	return NULL;
 }
@@ -245,6 +251,8 @@ int client(int argc, char **argv)
 		ret = -1;
 		goto out;
 	}
+	
+	server_count = ser_idx;
 
 	socket_fd = socket(AF_UNIX, SOCK_DGRAM, 0);
 

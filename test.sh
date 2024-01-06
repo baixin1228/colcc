@@ -1,3 +1,4 @@
+#!/usr/bin/bash
 #set -x
 
 function test()
