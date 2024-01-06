@@ -34,7 +34,55 @@ function test()
 		echo -e "\e[31mfail\e[0m"
 	fi
 
-	./colcc gcc -O3 -o main_1 main_1.o util_1.o -luuid
+	./colcc gcc client.c -E -o client_1.i
+	if [[ $? -eq 0 ]]
+	then
+		echo -e "\e[32mpass\e[0m"
+	else
+		echo -e "\e[31mfail\e[0m"
+	fi
+
+	./colcc gcc client_1.i -c -o client_1.o
+	if [[ $? -eq 0 ]]
+	then
+		echo -e "\e[32mpass\e[0m"
+	else
+		echo -e "\e[31mfail\e[0m"
+	fi
+
+	./colcc gcc server.c -E -o server_1.i
+	if [[ $? -eq 0 ]]
+	then
+		echo -e "\e[32mpass\e[0m"
+	else
+		echo -e "\e[31mfail\e[0m"
+	fi
+
+	./colcc gcc server_1.i -c -o server_1.o
+	if [[ $? -eq 0 ]]
+	then
+		echo -e "\e[32mpass\e[0m"
+	else
+		echo -e "\e[31mfail\e[0m"
+	fi
+
+	./colcc gcc protocol.c -E -o protocol_1.i
+	if [[ $? -eq 0 ]]
+	then
+		echo -e "\e[32mpass\e[0m"
+	else
+		echo -e "\e[31mfail\e[0m"
+	fi
+
+	./colcc gcc protocol_1.i -c -o protocol_1.o
+	if [[ $? -eq 0 ]]
+	then
+		echo -e "\e[32mpass\e[0m"
+	else
+		echo -e "\e[31mfail\e[0m"
+	fi
+
+	./colcc gcc -O3 -o main_1 main_1.o util_1.o client_1.o server_1.o protocol_1.o -luuid
 	if [[ $? -eq 0 ]]
 	then
 		echo -e "\e[32mpass\e[0m"
