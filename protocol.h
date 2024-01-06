@@ -18,9 +18,16 @@ enum {
 	HEART_BEAT,
 };
 
+enum {
+	COMPRESS_NONE = 0,
+	COMPRESS_LZO,
+	COMPRESS_LZ4,
+	COMPRESS_ZSTD,
+};
+
 int wait_start(FILE *socket_fp);
-int recv_remote_file(FILE *socket_fp, char *file_name, char *rename, bool safe_read);
-int send_remote_file(FILE *socket_fp, char *file_name, char *rename);
+int recv_remote_file(FILE *socket_fp, char *file_name, char *rename);
+int send_remote_file(FILE *socket_fp, char *file_name, char *rename, uint32_t compress);
 int delete_remote_file(FILE *socket_fp, char *file_name);
 int send_params(FILE *socket_fp, char **params, uint32_t params_count);
 int recv_params(FILE *socket_fp, 	char **params, uint32_t *params_count);

@@ -81,3 +81,6 @@ int fread_cache(FILE *fp, char *buffer, size_t len);
 int safe_fread_all(FILE *fp, char *buffer, size_t len);
 int fwrite_all(FILE *fp, char *buffer, size_t len);
 int mini_exec(int argc, char **argv, bool need_fork, int out_fd);
+
+void compress_record(uint32_t val);
+uint32_t get_compress_record();

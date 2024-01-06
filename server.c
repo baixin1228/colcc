@@ -26,7 +26,7 @@
 /* ------------------ server ---------------------- */
 int server_recv_file(FILE *socket_fp)
 {
-	return recv_remote_file(socket_fp, NULL, NULL, true);
+	return recv_remote_file(socket_fp, NULL, NULL);
 }
 
 int server_compiler(FILE *socket_fp)
@@ -99,7 +99,7 @@ int server_send_file(FILE *socket_fp)
 	
 	loginfo("send file:%s\n", file_name);
 
-	ret = send_remote_file(socket_fp, file_name, NULL);
+	ret = send_remote_file(socket_fp, file_name, NULL, COMPRESS_NONE);
 out:
 	if(file_name)
 		free(file_name);

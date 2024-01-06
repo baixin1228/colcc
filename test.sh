@@ -82,7 +82,7 @@ function test()
 		echo -e "\e[31mfail\e[0m"
 	fi
 
-	./colcc gcc -O3 -o main_1 main_1.o util_1.o client_1.o server_1.o protocol_1.o -luuid
+	./colcc gcc -O3 -o main_1 main_1.o util_1.o client_1.o server_1.o protocol_1.o -luuid `pkg-config --cflags --libs liblz4`
 	if [[ $? -eq 0 ]]
 	then
 		echo -e "\e[32mpass\e[0m"

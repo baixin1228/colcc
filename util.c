@@ -37,6 +37,25 @@ int endWith(const char *originString, char *end)
 	return 0;
 }
 
+static uint32_t _val = 0;
+void compress_record(uint32_t val)
+{
+	if(_val == 0)
+		_val = val;
+	else {
+		_val += val;
+		_val /= 2;
+	}
+}
+
+uint32_t get_compress_record()
+{
+	if(_val == 0)
+		return 100;
+	
+	return _val;
+}
+
 int get_random_str(char* random_str, const int random_len)
 {
 	int i;
@@ -148,7 +167,7 @@ int fread_all(FILE *fp, char *buffer, size_t len)
 {
 	int read_sum = 0;
 	int read_con;
-	while(len)
+	while(len && !feof(fp))
 	{
 		read_con = fread(buffer + read_sum, 1, len, fp);
 		if(read_con > 0)

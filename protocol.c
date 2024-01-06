@@ -1,3 +1,4 @@
+#include <lz4.h>
 #include <wait.h>
 #include <stdio.h>
 #include <errno.h>
@@ -49,13 +50,20 @@ int wait_start(FILE *socket_fp)
 }
 
 #define FILE_BUF_SIZE 0x10000
-int recv_remote_file(FILE *socket_fp, char *file_name, char *rename, bool safe_read)
+int recv_remote_file(FILE *socket_fp, char *file_name, char *rename)
 {
 	int ret = 0;
 	int fd = -1;
+	int read_len;
+	int data_len;
+	int decom_size;
 	char *write_file;
+	uint32_t compress;
 	uint32_t params_len;
+	uint32_t net_compress;
 	char *recv_buf = NULL;
+	char *decom_buf = NULL;
+	int net_compress_size;
 	char *remote_output_file = NULL;
 
 	recv_buf = malloc(FILE_BUF_SIZE);
@@ -79,9 +87,28 @@ int recv_remote_file(FILE *socket_fp, char *file_name, char *rename, bool safe_r
 	else
 		write_file = file_name;
 
+	if(fread_all(socket_fp, (char *)&net_compress, 4) != 0)
+	{
+		logerr("send_remote_file write fail.\n");
+		ret = -1;
+		goto out;
+	}
+	compress = ntohl(net_compress);
+
+	if(compress)
+	{
+		decom_buf = malloc(FILE_BUF_SIZE);
+		if(decom_buf == NULL)
+		{
+			logerr("recv_remote_file malloc fail\n");
+			ret = -1;
+			goto out;
+		}
+	}
+
 	if(fread_all(socket_fp, (char *)&params_len, 4) != 0)
 	{
-		logerr("fread_all fail\n");
+		logerr("fread_all filename_len fail\n");
 		goto out;
 	}
 
@@ -94,7 +121,7 @@ int recv_remote_file(FILE *socket_fp, char *file_name, char *rename, bool safe_r
 
 	if(fread_all(socket_fp, remote_output_file, params_len) != 0)
 	{
-		logerr("fread_all fail\n");
+		logerr("fread_all remote_output_file fail\n");
 		goto out;
 	}
 
@@ -120,7 +147,7 @@ int recv_remote_file(FILE *socket_fp, char *file_name, char *rename, bool safe_r
 
 	if(fread_all(socket_fp, (char *)&params_len, 4) != 0)
 	{
-		logerr("fread_all fail\n");
+		logerr("fread_all file len fail\n");
 		goto out;
 	}
 
@@ -132,22 +159,63 @@ int recv_remote_file(FILE *socket_fp, char *file_name, char *rename, bool safe_r
 
 	while(params_len)
 	{
-		int read_len = params_len > FILE_BUF_SIZE ? FILE_BUF_SIZE : params_len;
-		if(safe_read)
-			ret = fread_all(socket_fp, recv_buf, read_len);
-		else
-			ret = fread_all(socket_fp, recv_buf, read_len);
-
-		if(ret == 0)
+		read_len = params_len > FILE_BUF_SIZE ? FILE_BUF_SIZE : params_len;
+		switch(compress)
 		{
-			if(write_all(fd, recv_buf, read_len) != 0)
-				logerr("recv_remote_file write fail.\n");
+			case COMPRESS_NONE:
+				
+				ret = fread_all(socket_fp, recv_buf, read_len);
+				if(ret == 0)
+				{
+					if(write_all(fd, recv_buf, read_len) != 0)
+						logerr("recv_remote_file write fail.\n");
 
-			params_len -= read_len;
-		} else {
-			ret = -1;
-			goto out;
+					params_len -= read_len;
+				} else {
+					ret = -1;
+					goto out;
+				}
+			break;
+			case COMPRESS_LZ4:
+				ret = fread_all(socket_fp, (char *)&net_compress_size, 4);
+				if(ret != 0)
+				{
+					logerr("recv_remote_file fread net_compress_size all fail.\n");
+					ret = -1;
+					goto out;
+				}
+
+				data_len = ntohl(net_compress_size);
+				ret = fread_all(socket_fp, recv_buf, data_len);
+				if(ret != 0)
+				{
+					logerr("recv_remote_file fread recv_buf all fail. data_len:%d\n", data_len);
+					ret = -1;
+					goto out;
+				}
+
+				decom_size = LZ4_decompress_safe(recv_buf, decom_buf, data_len, read_len);
+				if(decom_size <= 0)
+				{
+					logerr("LZ4 decompress fail. decom_size:%d data_len:%d\n", decom_size, data_len);
+					ret = -1;
+					goto out;
+				}
+
+				if(decom_size != read_len)
+				{
+					logerr("LZ4 decompress decom_size != read_len.\n");
+					ret = -1;
+					goto out;
+				}
+
+				if(write_all(fd, decom_buf, decom_size) != 0)
+					logerr("recv_remote_file write fail.\n");
+
+				params_len -= decom_size;
+			break;
 		}
+
 	}
 
 	logfile("recv   file:%s %s.\n", write_file, ret == 0 ? "success" : "fail");
@@ -165,18 +233,33 @@ out:
 	return ret;
 }
 
-int send_remote_file(FILE *socket_fp, char *file_name, char *rename)
+int send_remote_file(FILE *socket_fp, char *file_name, char *rename, uint32_t compress)
 {
 	int ret = 0;
 	int read_len;
+	int data_len;
 	FILE *fp = NULL;
+	int net_compress_size;
+	uint32_t net_compress;
 	uint32_t file_name_len;
 	char *read_buffer = NULL;
+	char *com_buffer = NULL;
+
+	if(compress)
+		com_buffer = malloc(FILE_BUF_SIZE);
 
 	read_buffer = malloc(FILE_BUF_SIZE);
 	if(read_buffer == NULL)
 	{
 		logerr("recv_remote_file malloc fail\n");
+		ret = -1;
+		goto out;
+	}
+
+	net_compress = htonl(compress);
+	if(fwrite_all(socket_fp, (char *)&net_compress, 4) != 0)
+	{
+		logerr("send_remote_file write fail.\n");
 		ret = -1;
 		goto out;
 	}
@@ -246,17 +329,58 @@ int send_remote_file(FILE *socket_fp, char *file_name, char *rename)
 		goto out;
 	}
 	while(!feof(fp)){
-		read_len = fread(read_buffer, 1, FILE_BUF_SIZE, fp);
-		if(read_len > 0)
+		read_len = file_size > FILE_BUF_SIZE ? FILE_BUF_SIZE : file_size;
+		if(read_len == 0)
+			break;
+
+		ret = fread_all(fp, read_buffer, read_len);
+		if(ret == 0)
 		{
-			if(fwrite_all(socket_fp, read_buffer, read_len) != 0)
+			file_size -= read_len;
+
+			switch(compress)
 			{
-				logerr("send_remote_file write fail.\n");
-				ret = -1;
-				goto out;
+				case COMPRESS_NONE:
+					if(fwrite_all(socket_fp, read_buffer, read_len) != 0)
+					{
+						logerr("send_remote_file write fail.\n");
+						ret = -1;
+						goto out;
+					}
+				break;
+				case COMPRESS_LZ4:
+					data_len = LZ4_compress_fast(read_buffer, com_buffer, read_len, read_len, 1);
+					if(data_len <= 0)
+					{
+						logwarning("LZ4 compress fail. read_len:%d data_len:%d\n", read_len, data_len);
+						ret = -1;
+						goto out;
+					} else {
+						net_compress_size = htonl(data_len);
+
+						logdebug("send compress size:%d read_len:%d compress:%d%%\n", data_len, read_len, data_len * 100 / read_len);
+						
+						compress_record(data_len * 100 / read_len);
+
+						if(fwrite_all(socket_fp, (char *)&net_compress_size, 4) != 0)
+						{
+							logerr("send_remote_file write fail.\n");
+							ret = -1;
+							goto out;
+						}
+
+						if(fwrite_all(socket_fp, com_buffer, data_len) != 0)
+						{
+							logerr("send_remote_file write fail.\n");
+							ret = -1;
+							goto out;
+						}
+					}
+				break;
 			}
+
 		} else {
-			logerr("file:%s read fail.\n", file_name);
+			logerr("file:%s read fail. read_len:%d ret:%d\n", file_name, read_len, ret);
 			ret = -1;
 			goto out;
 		}

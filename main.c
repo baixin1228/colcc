@@ -66,6 +66,8 @@ struct remote_arg
 	char *link_lib_params[512];
 	uint32_t link_lib_count;
 
+	char compression;
+
 	FILE *socket_fp;
 	bool local;
 	/* 编译到那一步结束 */
@@ -164,7 +166,14 @@ int to_gcc_compiler(struct remote_arg *remote_arg, char *input_file, char *outpu
 			ret = -1;
 			goto out;
 		}
-		fflush(remote_arg->socket_fp);
+
+		if(fflush(remote_arg->socket_fp) != 0)
+		{
+			logerr("to_gcc_compiler fflush fail.\n");
+			ret = -1;
+			goto out;
+		}
+		
 		if(fread_all(remote_arg->socket_fp, &cmd, 1) != 0)
 		{
 			logerr("to_gcc_compiler write all fail.\n");
@@ -207,12 +216,17 @@ int to_gcc_compiler(struct remote_arg *remote_arg, char *input_file, char *outpu
 			ret = -1;
 			goto out;
 		}
-		fflush(remote_arg->socket_fp);
+		if(fflush(remote_arg->socket_fp) != 0)
+		{
+			logerr("to_gcc_compiler fflush fail.\n");
+			ret = -1;
+			goto out;
+		}
 
 		if(remote_arg->c)
-			ret = recv_remote_file(remote_arg->socket_fp, c_remote_file, output_file, false);
+			ret = recv_remote_file(remote_arg->socket_fp, c_remote_file, output_file);
 		else
-			ret = recv_remote_file(remote_arg->socket_fp, c_remote_file, c_output_file, false);
+			ret = recv_remote_file(remote_arg->socket_fp, c_remote_file, c_output_file);
 		if(ret != 0)
 			goto out;
 
@@ -276,12 +290,17 @@ int to_gcc_direct_compiler(struct remote_arg *remote_arg, char *input_file, char
 			goto out;
 		}
 
-		if(send_remote_file(remote_arg->socket_fp, input_file, e_remote_file) != 0)
+		if(send_remote_file(remote_arg->socket_fp, input_file, e_remote_file, remote_arg->compression) != 0)
 		{
 			logerr("send remote file fail.\n");
 			return -1;
 		}
-		fflush(remote_arg->socket_fp);
+		if(fflush(remote_arg->socket_fp) != 0)
+		{
+			logerr("to_gcc_compiler fflush fail.\n");
+			ret = -1;
+			goto out;
+		}
 
 		if(fread_all(remote_arg->socket_fp, &cmd, 1) != 0)
 		{
@@ -375,13 +394,19 @@ int to_gcc_pretreatment(struct remote_arg *remote_arg, char *input_file, char *o
 				goto out;
 			}
 			
-			ret = send_remote_file(remote_arg->socket_fp, e_output_file, e_remote_file);
+			ret = send_remote_file(remote_arg->socket_fp, e_output_file, e_remote_file, remote_arg->compression);
 			if(ret != 0)
 			{
 				ret = -1;
 				goto out;
 			}
-			fflush(remote_arg->socket_fp);
+
+			if(fflush(remote_arg->socket_fp) != 0)
+			{
+				logerr("to_gcc_compiler fflush fail.\n");
+				ret = -1;
+				goto out;
+			}
 
 			if(fread_all(remote_arg->socket_fp, &cmd, 1) != 0)
 			{
@@ -644,7 +669,8 @@ single_input:
 			goto out;
 		}
 		
-		fd_handle = msg_data[1];
+		fd_handle = msg_data[1] & 0xffff;
+		remote_arg.compression = msg_data[1] >> 16;
 		struct cmsghdr *ctrl = CMSG_FIRSTHDR(&recv_msg);
 		c_fd = *(int*)CMSG_DATA(ctrl);
 
@@ -697,7 +723,7 @@ out:
 		if(c_fd != -1)
 		{
 			msg_data[0] = PUT_FD;
-			msg_data[1] = fd_handle;
+			msg_data[1] = get_compress_record() << 16 | (fd_handle & 0xffff);
 			ret = msg_send_fd(socket_fd, &un_server, c_fd, (char *)&msg_data, sizeof(msg_data));
 			if (ret < 0)
 			{
@@ -724,6 +750,8 @@ int to_gcc(int argc, char **argv)
 	int ret = 0;
 	char *input_file = NULL;
 	char *output_file = NULL;
+
+	signal(SIGPIPE, SIG_IGN);
 
 	for (int i = 1; i < argc; ++i)
 	{
