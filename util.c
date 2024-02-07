@@ -37,23 +37,27 @@ int endWith(const char *originString, char *end)
 	return 0;
 }
 
-static uint32_t _val = 0;
-void compress_record(uint32_t val)
+static uint32_t _file_ori_size = 0;
+static uint32_t _file_compress_size = 0;
+static uint32_t _file_compress_times = 0;
+void compress_record(uint32_t ori_size, uint32_t compress_size)
 {
-	if(_val == 0)
-		_val = val;
-	else {
-		_val += val;
-		_val /= 2;
-	}
+	_file_ori_size += ori_size;
+	_file_compress_size += compress_size;
+	_file_compress_times++;
 }
 
 uint32_t get_compress_record()
 {
-	if(_val == 0)
+	if(_file_compress_size == 0)
 		return 100;
 	
-	return _val;
+	return _file_compress_size * 100 / _file_ori_size;
+}
+
+uint32_t get_compress_times()
+{
+	return _file_compress_times;
 }
 
 int get_random_str(char* random_str, const int random_len)

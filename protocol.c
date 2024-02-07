@@ -360,7 +360,7 @@ int send_remote_file(FILE *socket_fp, char *file_name, char *rename, uint32_t co
 
 						logdebug("send compress size:%d read_len:%d compress:%d%%\n", data_len, read_len, data_len * 100 / read_len);
 						
-						compress_record(data_len * 100 / read_len);
+						compress_record(read_len, data_len);
 
 						if(fwrite_all(socket_fp, (char *)&net_compress_size, 4) != 0)
 						{

@@ -171,7 +171,7 @@ find:
 		send_data[0] = CMD_OK;
 		send_data[1] = server_info[k].compression << 16 | (task_id & 0xffff);
 		if(msg_send_fd(socket_fd, &task->client_un, send_fd_obj->fd, (char *)&send_data, sizeof(send_data)) == 0)
-			printf("send fd:%d task_id:%-3d addr:%s\n", send_fd_obj->fd, task_id, server_info[k].addr);
+			printf("send fd:%-3d task_id:%-3d addr:%s\n", send_fd_obj->fd, task_id, server_info[k].addr);
 		else {
 			logerr("send fail fd:%d task_id:%d socket:%s\n", send_fd_obj->fd, task_id, task->client_un.sun_path);
 			disable_task(task);
@@ -196,6 +196,7 @@ int client(int argc, char **argv)
 	char *tmp;
 	pthread_t thr;
 	uint32_t com_ps;
+	uint32_t com_times;
 	uint32_t task_id;
 	int ser_idx = 0;
 	int socket_fd = -1;
@@ -203,7 +204,11 @@ int client(int argc, char **argv)
 	uint32_t recv_data[2] = {0};
 	struct sockaddr_un server_un = {0};
 	struct sockaddr_un client_un = {0};
-
+	
+	if(system("rm -rf /tmp/colcc/*") != 0)
+	{
+		logerr("delete /tmp/colcc/* fail.");
+	}
 
 	for (i = 2; i < argc; ++i)
 	{
@@ -317,11 +322,12 @@ int client(int argc, char **argv)
 			break;
 			case PUT_FD:
 				task_id = recv_data[1] & 0xffff;
-				com_ps = recv_data[1] >> 16;
+				com_ps = recv_data[1] >> 24;
+				com_times = recv_data[1] >> 16 & 0xff;
 				if(tasks[task_id].state != NONE)
 				{
 					struct cmsghdr *ctrl = CMSG_FIRSTHDR(&recv_msg);
-					printf("put  fd:%d task_id:%-3d comp perc:%d%%\n", *(int*)CMSG_DATA(ctrl), task_id , com_ps);
+					printf("put  fd:%-3d task_id:%-3d comp perc:%3d%% comp_times:%d\n", *(int*)CMSG_DATA(ctrl), task_id , com_ps, com_times);
 					tasks[task_id].fd_obj->fd = *(int*)CMSG_DATA(ctrl);
 					tasks[task_id].fd_obj->task = NULL;
 					tasks[task_id].fd_obj = NULL;

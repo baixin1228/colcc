@@ -723,7 +723,7 @@ out:
 		if(c_fd != -1)
 		{
 			msg_data[0] = PUT_FD;
-			msg_data[1] = get_compress_record() << 16 | (fd_handle & 0xffff);
+			msg_data[1] = get_compress_record() << 24 | get_compress_times() << 16 | (fd_handle & 0xffff);
 			ret = msg_send_fd(socket_fd, &un_server, c_fd, (char *)&msg_data, sizeof(msg_data));
 			if (ret < 0)
 			{
