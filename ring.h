@@ -21,4 +21,6 @@ struct mini_ring
 };
 
 int put_buf(struct mini_ring *ring, char *buf, size_t size);
-struct ring_node *get_buf(struct mini_ring *ring);
+int put_buf_block(struct mini_ring *ring, char *buf, size_t size);
+int get_buf(struct mini_ring *ring, char **buf, size_t *size);
+int get_buf_block(struct mini_ring *ring, char **buf, size_t *size);

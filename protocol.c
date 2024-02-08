@@ -55,26 +55,22 @@ int wait_start(FILE *socket_fp)
 void *recv_thread(void *data)
 {
 	struct mini_ring *recv_ring = data;
-	struct ring_node *node;
+	char *node_buf;
+	size_t node_buf_size;
 
 	int fd = *(int *)recv_ring->priv;
 
 	while(1)
 	{
-		node = get_buf(recv_ring);
-		if(node == NULL)
-		{
-			usleep(1000);
-			continue;
-		}
+		get_buf_block(recv_ring, &node_buf, &node_buf_size);
 
-		if(node->ptr == NULL)
+		if(node_buf == NULL)
 			break;
 
-		if(write_all(fd, node->ptr, node->size) != 0)
+		if(write_all(fd, node_buf, node_buf_size) != 0)
 			logerr("recv_remote_file write fail.\n");
 
-		free(node->ptr);
+		free(node_buf);
 	}
 
 	return NULL;
@@ -84,7 +80,8 @@ void *lz4_decompress_thread(void *data)
 {
 	struct mini_ring *decompress_ring = data;
 	struct mini_ring recv_ring = {0};
-	struct ring_node *node;
+	char *node_buf;
+	size_t node_buf_size;
 	char *decom_buf = NULL;
 	pthread_t thr;
 	int decom_size;
@@ -95,16 +92,11 @@ void *lz4_decompress_thread(void *data)
 
 	while(1)
 	{
-		node = get_buf(decompress_ring);
-		if(node == NULL)
-		{
-			usleep(1000);
-			continue;
-		}
+		get_buf_block(decompress_ring, &node_buf, &node_buf_size);
 
-		if(node->ptr == NULL)
+		if(node_buf == NULL)
 		{
-			put_buf(&recv_ring, NULL, 0);
+			put_buf_block(&recv_ring, NULL, 0);
 			break;
 		}
 
@@ -114,16 +106,16 @@ void *lz4_decompress_thread(void *data)
 			logerr("recv_remote_file malloc fail\n");
 		}
 
-		decom_size = LZ4_decompress_safe(node->ptr, decom_buf, node->size, FILE_BUF_SIZE);
+		decom_size = LZ4_decompress_safe(node_buf, decom_buf, node_buf_size, FILE_BUF_SIZE);
 		if(decom_size <= 0)
 		{
-			logerr("LZ4 decompress fail. decom_size:%d compress_len:%lu\n", decom_size, node->size);
+			logerr("LZ4 decompress fail. decom_size:%d compress_len:%lu\n", decom_size, node_buf_size);
 			free(decom_buf);
 		} else {
-			put_buf(&recv_ring, decom_buf, decom_size);
+			put_buf_block(&recv_ring, decom_buf, decom_size);
 		}
 		
-		free(node->ptr);
+		free(node_buf);
 	}
 
 	pthread_join(thr, NULL);
@@ -260,13 +252,13 @@ int recv_remote_file(FILE *socket_fp, char *file_name, char *rename)
 			goto out;
 		}
 
-		put_buf(&read_ring, recv_buf, block_size);
+		put_buf_block(&read_ring, recv_buf, block_size);
 	}
 
 	logfile("recv   file:%s %s.\n", write_file, ret == 0 ? "success" : "fail");
 
 out:
-	put_buf(&read_ring, NULL, 0);
+	put_buf_block(&read_ring, NULL, 0);
 
 	if(remote_output_file)
 		free(remote_output_file);
@@ -282,7 +274,8 @@ out:
 void *send_thread(void *data)
 {
 	struct mini_ring *send_ring = data;
-	struct ring_node *node;
+	char *node_buf;
+	size_t node_buf_size;
 	int send_size_net;
 	int data_len;
 
@@ -290,14 +283,9 @@ void *send_thread(void *data)
 
 	while(1)
 	{
-		node = get_buf(send_ring);
-		if(node == NULL)
-		{
-			usleep(1000);
-			continue;
-		}
+		get_buf_block(send_ring, &node_buf, &node_buf_size);
 
-		if(node->ptr == NULL)
+		if(node_buf == NULL)
 		{
 			send_size_net = htonl(0);
 			if(fwrite_all(socket_fp, (char *)&send_size_net, 4) != 0)
@@ -307,20 +295,20 @@ void *send_thread(void *data)
 			break;
 		}
 
-		logdebug("send size:%lu\n", node->size);
+		logdebug("send size:%lu\n", node_buf_size);
 		
-		send_size_net = htonl(node->size);
+		send_size_net = htonl(node_buf_size);
 		if(fwrite_all(socket_fp, (char *)&send_size_net, 4) != 0)
 		{
 			logerr("send_remote_file write fail.\n");
 		}
 
-		if(fwrite_all(socket_fp, node->ptr, node->size) != 0)
+		if(fwrite_all(socket_fp, node_buf, node_buf_size) != 0)
 		{
 			logerr("send_remote_file write fail.\n");
 		}
 
-		free(node->ptr);
+		free(node_buf);
 	}
 	return NULL;
 }
@@ -329,7 +317,8 @@ void *lz4_compress_thread(void *data)
 {
 	struct mini_ring send_ring = {0};
 	struct mini_ring *compress_ring = data;
-	struct ring_node *node;
+	char *node_buf;
+	size_t node_buf_size;
 	char *com_buffer = NULL;
 	pthread_t thr;
 	int data_len;
@@ -341,36 +330,31 @@ void *lz4_compress_thread(void *data)
 
 	while(1)
 	{
-		node = get_buf(compress_ring);
-		if(node == NULL)
-		{
-			usleep(1000);
-			continue;
-		}
+		get_buf_block(compress_ring, &node_buf, &node_buf_size);
 
-		if(node->ptr == NULL)
+		if(node_buf == NULL)
 		{
-			put_buf(&send_ring, NULL, 0);
+			put_buf_block(&send_ring, NULL, 0);
 			break;
 		}
 
-		com_buffer = malloc(node->size);
+		com_buffer = malloc(node_buf_size);
 
-		data_len = LZ4_compress_fast(node->ptr, com_buffer, node->size, node->size, 1);
+		data_len = LZ4_compress_fast(node_buf, com_buffer, node_buf_size, node_buf_size, 1);
 		
 		if(data_len <= 0)
 		{
-			logwarning("LZ4 compress fail. read_len:%lu data_len:%d\n", node->size, data_len);
+			logwarning("LZ4 compress fail. read_len:%lu data_len:%d\n", node_buf_size, data_len);
 			free(com_buffer);
 		} else {
-			logdebug("compress:%lu%%\n", data_len * 100 / node->size);
+			logdebug("compress:%lu%%\n", data_len * 100 / node_buf_size);
 			
-			compress_record(node->size, data_len);
+			compress_record(node_buf_size, data_len);
 			
-			put_buf(&send_ring, com_buffer, data_len);
+			put_buf_block(&send_ring, com_buffer, data_len);
 		}
 
-		free(node->ptr);
+		free(node_buf);
 	}
 
 	pthread_join(thr, NULL);
@@ -490,7 +474,7 @@ int send_remote_file(FILE *socket_fp, char *file_name, char *rename, uint32_t co
 		if(ret == 0)
 		{
 			file_size -= read_len;
-			put_buf(&send_ring, read_buffer, read_len);
+			put_buf_block(&send_ring, read_buffer, read_len);
 		} else {
 			logerr("file:%s read fail. read_len:%d ret:%d\n", file_name, read_len, ret);
 			
@@ -503,7 +487,7 @@ int send_remote_file(FILE *socket_fp, char *file_name, char *rename, uint32_t co
 	}
 
 out:
-	put_buf(&send_ring, NULL, 0);
+	put_buf_block(&send_ring, NULL, 0);
 
 	pthread_join(thr, NULL);
 
