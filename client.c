@@ -204,11 +204,6 @@ int client(int argc, char **argv)
 	uint32_t recv_data[2] = {0};
 	struct sockaddr_un server_un = {0};
 	struct sockaddr_un client_un = {0};
-	
-	if(system("rm -rf /tmp/colcc/*") != 0)
-	{
-		logerr("delete /tmp/colcc/* fail.");
-	}
 
 	for (i = 2; i < argc; ++i)
 	{

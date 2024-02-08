@@ -292,19 +292,19 @@ int to_gcc_direct_compiler(struct remote_arg *remote_arg, char *input_file, char
 
 		if(send_remote_file(remote_arg->socket_fp, input_file, e_remote_file, remote_arg->compression) != 0)
 		{
-			logerr("send remote file fail.\n");
+			logerr("to_gcc_direct_compiler send remote file fail.\n");
 			return -1;
 		}
 		if(fflush(remote_arg->socket_fp) != 0)
 		{
-			logerr("to_gcc_compiler fflush fail.\n");
+			logerr("to_gcc_direct_compiler fflush fail.\n%s\n", strerror(errno));
 			ret = -1;
 			goto out;
 		}
 
 		if(fread_all(remote_arg->socket_fp, &cmd, 1) != 0)
 		{
-			logerr("to_gcc_compiler write all fail.\n");
+			logerr("to_gcc_direct_compiler write all fail.\n");
 			ret = -1;
 			goto out;
 		}
@@ -403,7 +403,7 @@ int to_gcc_pretreatment(struct remote_arg *remote_arg, char *input_file, char *o
 
 			if(fflush(remote_arg->socket_fp) != 0)
 			{
-				logerr("to_gcc_compiler fflush fail.\n");
+				logerr("to_gcc_pretreatment fflush fail.\n");
 				ret = -1;
 				goto out;
 			}
@@ -896,12 +896,22 @@ int main(int argc, char **argv)
 
 	if(strcmp("client", argv[1]) == 0)
 	{
+		if(system("rm -rf /tmp/colcc/*") != 0)
+		{
+			logerr("delete /tmp/colcc/* fail.");
+		}
+
 		ret = client(argc, argv);
 		goto out1;
 	}
 
 	if(strcmp("server", argv[1]) == 0)
 	{
+		if(system("rm -rf /tmp/colcc/*") != 0)
+		{
+			logerr("delete /tmp/colcc/* fail.");
+		}
+	
 		ret = server(argc, argv);
 		goto out1;
 	}
