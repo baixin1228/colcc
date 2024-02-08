@@ -23,7 +23,7 @@
 #include "client.h"
 #include "protocol.h"
 
-#define TIME_OUT_MS 100
+#define TIME_OUT_MS 200
 #define TASK_COUNT 512
 /* ------------------ client ---------------------- */
 enum TASK_STATE{
@@ -116,7 +116,7 @@ void *task_daemon(void *data)
 			{
 				if(timesub_ms(tasks[i].time, now) > TIME_OUT_MS)
 				{
-					loginfo("time out:%d\n", i);
+					logerr("------------- time out:%d -----------------\n", i);
 					disable_task(&tasks[i]);
 				}
 			}

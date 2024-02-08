@@ -457,6 +457,7 @@ void *heart_thread(void *data)
 	un_server.sun_family = AF_UNIX;
 	strcpy(un_server.sun_path, MSG_ADDR);
 
+	int i = 0;
 	while(!stop)
 	{
 		msg_data[0] = HEART_BEAT;
@@ -466,6 +467,12 @@ void *heart_thread(void *data)
 			break;
 		}
 		usleep(50000);
+		i++;
+		if(i == 400)
+		{
+			i=0;
+			logerr("heart\n");
+		}
 	}
 	close(socket_fd);
 	return NULL;
@@ -627,6 +634,7 @@ single_input:
 			goto out;
 		}
 
+		/* recv data need */
 		if (bind(socket_fd, (struct sockaddr*)&un_client, sizeof(un_client)) < 0) {
 			logerr("bind failed\n");
 			ret = -1;
@@ -724,12 +732,10 @@ out:
 		{
 			msg_data[0] = PUT_FD;
 			msg_data[1] = get_compress_record() << 24 | get_compress_times() << 16 | (fd_handle & 0xffff);
-			ret = msg_send_fd(socket_fd, &un_server, c_fd, (char *)&msg_data, sizeof(msg_data));
-			if (ret < 0)
+			if (msg_send_fd(socket_fd, &un_server, c_fd, (char *)&msg_data, sizeof(msg_data)) < 0)
 			{
 				logerr("sendmsg error! %s %s\n", strerror(errno), MSG_ADDR);
 			}
-			ret = 0;
 		}
 		close(socket_fd);
 		unlink(un_client.sun_path);
